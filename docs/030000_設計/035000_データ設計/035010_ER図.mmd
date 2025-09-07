@@ -1,0 +1,13 @@
+%% 035010 ER図（Mermaid例）
+erDiagram
+  USER ||--o{ ORDER : places
+  ORDER ||--|{ ORDER_ITEM : contains
+  USER {
+    UUID id PK
+    string email
+  }
+  ORDER {
+    UUID id PK
+    string status
+  }
+
