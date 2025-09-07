@@ -33,6 +33,14 @@ Redmineを中枢管理/承認/監査ハブとして構成し、VS Code/Databrick
 
 ---
 
+### 2.1 ワークフロー（テキスト図）
+
+`New` → `In Review` → `Waiting Approval` → {`Approved` → `Done`} / {`Rework` → `In Review`} → `Archived`
+
+チェックリスト（例）: 影響範囲, 出典添付, リスク評価, ロールバック手順（FR-002）
+
+---
+
 ## 3. 役割/権限（RBAC/ABAC）
 
 - 役割
@@ -40,6 +48,15 @@ Redmineを中枢管理/承認/監査ハブとして構成し、VS Code/Databrick
 - 権限方針
   - 最小権限（NFR-006）、AIエージェントは限定プロジェクト/操作に制限
   - ABAC属性: `project`, `data_class`, `risk_level` により承認必須範囲を制御（FR-016）
+
+---
+
+### 3.1 権限マトリクス（抜粋）
+
+- Admin: 設定/フィールド/ロール/監査エクスポート/ユーザー管理
+- Approver: ステータス遷移（Waiting→Approved/Reject）, 監査閲覧
+- Contributor: 作成/更新/コメント/添付、自己課題のステータス変更
+- Agent: 作成/コメント/添付（承認前の変更不可）、閲覧制限あり
 
 ---
 
@@ -68,6 +85,21 @@ Redmineを中枢管理/承認/監査ハブとして構成し、VS Code/Databrick
 
 ---
 
+### 5.1 Webhook/REST 仕様（抜粋）
+
+- 送信Webhook: `issue_updated`, `issue_created`（共有シークレットで署名）
+- 受信REST例
+
+```http
+POST /issues/123/notes
+X-Api-Key: <redmine-key>
+Content-Type: application/json
+
+{"notes":"Run checks passed.","private_notes":false}
+```
+
+---
+
 ## 6. 監査/レポート
 
 - 操作主体（人/AI）、根拠資料、承認者、成果物リンクを自動ひも付け（FR-015）
@@ -93,6 +125,14 @@ Redmineを中枢管理/承認/監査ハブとして構成し、VS Code/Databrick
 
 ---
 
+### 8.1 SLA/ダッシュボード（例）
+
+- 承認SLA: p95 ≤ 24h、滞留閾値=48h アラート
+- 差戻し率: 月次≤15%
+- 監査漏れ: 0件（必須フィールド未入力時は遷移不可）
+
+---
+
 ## 9. 受け入れ基準（設計反映）
 
 - AB-01/02/04/05/06/14/15 に対応するフィールド/ワークフロー/エクスポート/SSO設定
@@ -112,3 +152,18 @@ Redmineを中枢管理/承認/監査ハブとして構成し、VS Code/Databrick
 
 - FR-001/002/003/004/015/016/017/018/019/020 → §2〜§6
 - NFR-006/007/010/011/013/014/016/017/018/019/023 → §3, §6〜§8
+
+---
+
+## 付録A: プラグイン/設定（推奨）
+
+- Checklist系、Redmine Agile（任意）、OIDC SSOプラグイン
+- 必須バリデーション: `Correlation-Id`、`Actor`、`Data Class`、`Risk Level`
+
+## 付録B: バックアップ/DR
+
+- DB/ファイルストアのスナップショット、復旧RPO≤24h/RTO≤4h 目安
+
+## 付録C: 移行計画（簡略）
+
+- スキーマ/フィールド定義 → テンプレ作成 → パイロット（1プロジェクト）→ 全社展開

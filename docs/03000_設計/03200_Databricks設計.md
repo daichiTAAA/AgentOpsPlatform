@@ -38,6 +38,14 @@
 
 ---
 
+## 2.1 環境/ネットワーク構成
+
+- 環境: `dev` / `stg` / `prod` ワークスペース分離
+- ネットワーク: Private Link/VPCE経由アクセス、Workspace IPアクセスリスト（NFR-017）
+- 認証: サービスプリンシパル＋短期トークン、Secret Scopeで資格情報を保護（NFR-007）
+
+---
+
 ## 3. データモデル
 
 ### 3.1 メタデータスキーマ（抜粋）
@@ -55,6 +63,31 @@
 - インデックス: `vx_documents_v1`
 - フィールド: `embedding`, `doc_id`, `title`, `path`, `tags`, `pii_level`
 - フィルタリング: `project`, `pii_level`, `tags`
+
+---
+
+### 3.3 DDL（抜粋）
+
+```sql
+CREATE TABLE IF NOT EXISTS kb.documents (
+  doc_id STRING, path STRING, title STRING, type STRING,
+  project STRING, tags ARRAY<STRING>, updated_at TIMESTAMP,
+  source_url STRING, task_id STRING, actor STRING,
+  origin STRING, pii_level STRING
+) USING DELTA;
+
+CREATE TABLE IF NOT EXISTS kb.chunks (
+  chunk_id STRING, doc_id STRING, seq INT,
+  text STRING, embedding ARRAY<FLOAT>, hash STRING
+) USING DELTA;
+
+CREATE TABLE IF NOT EXISTS kb.queries_log (
+  ts TIMESTAMP, user_or_agent STRING, query STRING, mode STRING,
+  correlation_id STRING, result_size INT, pii_masked BOOLEAN
+) USING DELTA;
+```
+
+最適化: `OPTIMIZE kb.chunks ZORDER BY (doc_id, seq);`、`VACUUM`は保持方針に従う（NFR-014）。
 
 ---
 
@@ -93,6 +126,20 @@
 - ルーティング: `/kb/search`, `/kb/sql-query`, `/kb/genie`, `/kb/serve` → 各Databricks APIへ1:1
 - 監査: `X-Correlation-Id`必須、マスキングフラグを付与（FR-027/032）
 
+#### 5.5 Statement Execution ポーリング擬似コード
+
+```python
+exec = post('/statements', params)
+while exec.state in ['PENDING','RUNNING']:
+  if elapsed > wait_timeout:
+    break
+  sleep(0.5)
+result = get(exec.result_url)
+if result.disposition == 'EXTERNAL_LINKS':
+  for link in result.links:
+    download_with_no_auth(link)
+```
+
 ---
 
 ## 6. セキュリティ/権限/コンプライアンス
@@ -110,6 +157,10 @@
 - ログ/メトリクス/トレースを集中管理（NFR-010/019）。相関IDでエンドツーエンド追跡。
 - 監査レポート: 期間/案件別にPDF/CSV出力（FR-017）。
 - 自己回復: 失敗ジョブのリトライ/再実行（NFR-020）。
+
+運用Runbook（抜粋）
+- アラート受信→関連相関IDでログ横断検索→再実行/ロールバック手順
+- インデックスの再構築基準: スコア低下/ヒット率閾値割れ
 
 ---
 
@@ -147,3 +198,24 @@
 
 - FR-009/010/011/017/020/033〜041 → §3, §4, §5, §7
 - NFR-006/007/010/012/013/014/015/016/017/019/020/021/023 → §6〜§8
+
+---
+
+## 付録A: Vector Search インデックス作成例
+
+```sql
+CREATE INDEX vx_documents_v1
+ON VECTOR INDEX
+OPTIONS (
+  embedding_col = 'embedding',
+  id_col = 'chunk_id',
+  schema = 'kb', table = 'chunks'
+);
+```
+
+## 付録B: Gateway ルーティング表（抜粋）
+
+- `POST /kb/search` → Statement Execution / Vector Search
+- `POST /kb/sql-query` → SQL Queries API（saved query id）
+- `POST /kb/genie` → Genie API
+- `POST /kb/serve` → Serving Endpoints API

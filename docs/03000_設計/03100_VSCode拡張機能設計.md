@@ -44,6 +44,21 @@
 
 ---
 
+## 2.1 アクティベーション/パッケージ構成
+
+- 拡張ID: `com.agentops.vscode-ext`
+- `activationEvents`
+  - `onStartupFinished`, `onCommand:agentops.*`, `workspaceContains:**/*`
+- 主要依存: `vscode`, `axios`（Gateway呼出）, `zod`（設定/レスポンス検証）
+- フォルダ構成（案）
+  - `src/commands/*` コマンド実装
+  - `src/tools/*` Copilotツール実装
+  - `src/services/*` Gateway/Redmine/Telemetry
+  - `src/ui/*` Webview/パネル
+  - `src/policies/*` マスキング/レート/キャッシュ
+
+---
+
 ## 3. 機能設計
 
 ### 3.1 コマンド/貢献ポイント
@@ -77,6 +92,23 @@
 
 ---
 
+## 3.5 設定スキーマ（JSON）
+
+```json
+{
+  "agentops.gateway.baseUrl": {"type": "string"},
+  "agentops.allowedTools": {"type": "array", "items": {"type": "string"}},
+  "agentops.rateLimit.rpm": {"type": "number", "default": 30},
+  "agentops.cache.ttlSec": {"type": "number", "default": 300},
+  "agentops.masking.enabled": {"type": "boolean", "default": true},
+  "agentops.masking.patterns": {"type": "array", "items": {"type": "string"}},
+  "agentops.telemetry.enabled": {"type": "boolean", "default": true},
+  "agentops.readonly": {"type": "boolean", "default": true}
+}
+```
+
+---
+
 ## 4. UI/UX設計
 
 - アクティビティバー「AgentOps」ビュー
@@ -87,6 +119,21 @@
   - 接続状態、レート制御状況、相関ID表示
 - 確認ダイアログ
   - ツール呼出時/外部転送時に説明/出典/データ範囲を明示（FR-028）
+
+---
+
+## 4.1 UXフロー（例）
+
+- 知識検索（手動）
+  1. `agentops.searchKnowledge` 実行
+  2. 入力パネルでクエリ/モード/フィルタを設定
+  3. 重要操作は確認ダイアログで許諾（FR-028）
+  4. 結果一覧→エディタへ引用挿入（出典つき, FR-022/023）
+
+- PR作成
+  1. `agentops.showDiff` 実行→差分確認
+  2. `agentops.linkArtifacts` でメタ付与（FR-020）
+  3. `agentops.runChecks` → 結果OKならPR作成→Redmineにリンク投稿（FR-014/019）
 
 ---
 
@@ -113,6 +160,27 @@
   - `POST /kb/serve`（Serving Endpoints 推論）
   - 全てレスポンス透過返却（FR-041）
 
+#### 6.1.1 リクエスト/レスポンス例
+
+```http
+POST /kb/search HTTP/1.1
+Authorization: Bearer <token>
+X-Correlation-Id: <uuid-v4>
+Content-Type: application/json
+
+{"query":"RAG 設計","mode":"vector","top_k":8,"filters":{"project":"DOCS"}}
+```
+
+```json
+{
+  "results": [
+    {"title":"RAG設計ガイド","url":"https://...","snippet":"...","score":0.82,
+     "doc_id":"doc_123","source":"databricks"}
+  ],
+  "latency_ms": 820
+}
+```
+
 ### 6.2 Redmine REST/Webhook
 
 - `POST /issues/:id/notes` 実行ログ/出典/相関IDの登録
@@ -136,12 +204,19 @@
 - 監査イベント: `command_executed`, `tool_invoked`, `query_sent`, `result_shown`, `artifact_linked`
 - ログ出力: 拡張→Gateway→Redmineに集約（FR-003/027/015）
 
+相関ID形式: UUID v4（例: `c55a2dfe-0a9c-4b1c-9e8e-0a6b9f7d2a41`）。
+
 ---
 
 ## 9. 性能/スケーラビリティ
 
 - SLO: LM Tools経由 p95≤5s、同時接続100ユーザー（NFR-021, 177再掲）
 - レート制御/キャッシュにより冪等・負荷低減（FR-030/031）
+
+### 9.1 レート制御/キャッシュ設計
+
+- アルゴリズム: Token Bucket（初期バースト=10, 充填= `rpm/60`/秒）
+- キャッシュ: キー=`hash(mode, query, filters)`, TTL=`cache.ttlSec`（ヒット時に`X-Cache: HIT`）
 
 ---
 
@@ -150,6 +225,12 @@
 - 入力検証エラー: 400系（再入力促し）
 - 認証失効: 再ログイン誘導
 - Gateway/Databricks障害: リトライ＋フォールバック表示、相関ID提示（NFR-020）
+
+エラーコード対応（例）
+- 400 入力不正 → ダイアログで再入力
+- 401/403 認証/権限 → SSO再ログイン/管理者連絡誘導
+- 429 レート超過 → 待機UI＋バックオフ
+- 5xx Gateway/Databricks → リトライ（指数バックオフ最大3回）
 
 ---
 
@@ -172,3 +253,25 @@
 
 - FR-012/013/014/018/019/020/021〜032/024〜031/026 → 本設計 §3, §5, §6, §7
 - NFR-006/007/010/016/020/021/022/023 → 本設計 §7, §8, §9, §10
+
+---
+
+## 付録A: テレメトリ/監査イベント
+
+- `command_executed` {`command`, `actor`, `task_id`, `correlation_id`}
+- `tool_invoked` {`tool`, `mode`, `params_hash`, `allowed`, `confirmed`}
+- `query_sent` {`mode`, `latency_ms`, `result_size`, `cache_hit`}
+- `result_shown` {`pii_masked`, `top_k`}
+- `artifact_linked` {`files[]`, `task_id`}
+
+## 付録B: テスト計画（抜粋）
+
+- ユニット: 設定検証、レート/キャッシュ、マスキング
+- 統合: GatewayモックでAPI成功/失敗、相関ID伝播
+- E2E: UC-01〜04をシナリオテスト、AB-04/07/08/09/10/13 満たすこと
+
+## 付録C: リリース計画
+
+- MVP: 検索/引用/手動リンク
+- Beta: Copilotツール自動選択、品質チェック、Webhook連携
+- GA: ポリシー配布・監査ダッシュボード・i18n仕上げ
