@@ -1,0 +1,69 @@
+%% 034230 シーケンス図（StrategicExecutionService）
+%% UC-01: 戦略実行管理の詳細フロー
+sequenceDiagram
+    participant E as 経営者
+    participant R as Redmine
+    participant V as VS Code Workspace
+    participant C as GitHub Copilot
+    participant S as StrategicExecutionService
+    participant D as Databricks
+    
+    %% Phase 1: ビジョン登録・初期分析
+    E->>R: ビジョン/目標登録
+    R->>S: 戦略分析タスク作成（task_id）
+    S->>S: 入力検証・形式チェック
+    S->>D: 過去事例検索（類似戦略パターン）
+    D-->>S: 成功事例・失敗要因データ
+    S->>D: 目標分解・WBS生成分析
+    D-->>S: 最適化されたタスク階層・依存関係
+    S->>D: リスク評価・実現可能性分析
+    D-->>S: リスクファクター・成功確率
+    S->>V: 分析結果を共同編集ワークスペースに配置
+    S->>R: 初期計画書作成完了（approval_request_id）
+    R->>E: 承認依頼通知
+    
+    %% Phase 2: 人機協調レビュー・計画調整
+    E->>V: 計画書レビュー開始
+    E->>C: 計画書改善・ベストプラクティス相談
+    C->>D: 過去事例・業界動向検索リクエスト
+    D-->>C: 関連データ・推奨パターン
+    C->>V: 過去事例に基づく修正提案表示
+    
+    alt 修正が必要
+        E->>V: 計画書修正・コメント追加
+        C->>V: 修正内容の整合性チェック・提案
+        V->>S: 修正内容反映リクエスト
+        S->>D: 修正を踏まえた再分析実行
+        D-->>S: 調整済み計画・影響評価
+        S->>V: 更新版計画書配置
+        S->>R: 修正版承認依頼（updated_approval_request_id）
+        R->>E: 再承認通知
+    else 承認
+        E->>V: 最終承認コメント記載
+        C->>V: 承認コメントテンプレート提案
+        V->>S: 承認完了通知
+        S->>R: 計画書承認完了登録
+    end
+    
+    %% Phase 3: 承認後実行・進捗管理
+    E->>R: 実行開始承認
+    R->>S: 戦略実行開始指示
+    S->>R: 実行タスク群作成・割り当て
+    S->>D: 進捗監視・分析設定
+    
+    loop 定期進捗管理
+        D->>S: 進捗データ・KPI分析結果
+        S->>S: リスク検出・調整提案生成
+        alt リスク検出
+            S->>R: リスクアラート・対策提案
+            R->>E: 緊急対応通知
+        else 正常進行
+            S->>R: 定期進捗レポート登録
+        end
+    end
+    
+    %% エラーハンドリング例
+    Note over S,D: エラー時の代替フロー
+    D-xS: Databricks API障害
+    S->>S: 簡易分析モードで継続
+    S->>R: 障害通知・復旧後再分析予定登録
